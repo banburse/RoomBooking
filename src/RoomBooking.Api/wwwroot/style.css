@@ -194,3 +194,41 @@ select, input[type="text"], input[type="time"] {
 .c5 { background: #cffafe; border-left-color: #0891b2; }
 
 .hint { color: var(--muted); font-size: 0.85rem; }
+
+/* ---------- Dialogi ---------- */
+
+dialog {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0;
+  width: min(440px, calc(100vw - 24px));
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+dialog::backdrop { background: rgba(15, 23, 42, 0.45); }
+dialog form, .dialog-body { padding: 16px 18px; margin: 0; }
+dialog h2 { margin: 0 0 6px; font-size: 1.1rem; }
+
+.summary { margin: 0 0 10px; }
+.muted { color: var(--muted); }
+
+.form-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.form-row input, .form-row select { width: 100%; }
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.error-box {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border: 1px solid #f5c2c2;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-top: 8px;
+}
+.error-box strong { display: block; }
+.error-box ul { margin: 4px 0 0; padding-left: 18px; }

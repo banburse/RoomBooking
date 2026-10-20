@@ -12,6 +12,7 @@
   var SLOT_MIN = 30;
   var SLOT_COUNT = (DAY_END_MIN - DAY_START_MIN) / SLOT_MIN; // 24
   var DAYS = 5;                 // pn-pt
+  var NAME_KEY = 'roombooking.bookedBy';
   var RESOURCE_KEY = 'roombooking.resourceId';
   var COLOR_CLASSES = 6;
 
@@ -29,7 +30,8 @@
     resourceId: '',
     weekStart: startOfWeek(new Date()),
     bookings: [],
-    loadSeq: 0
+    loadSeq: 0,
+    pendingSlotStart: null
   };
 
   // ---------- Elementy ----------
@@ -44,7 +46,20 @@
     weekRange: $('week-range'),
     status: $('status'),
     grid: $('week-grid'),
-    tzName: $('tz-name')
+    tzName: $('tz-name'),
+
+    bookingDialog: $('booking-dialog'),
+    bookingForm: $('booking-form'),
+    bookingSummary: $('booking-summary'),
+    bookedBy: $('booked-by'),
+    bookingTitle: $('booking-title'),
+    duration: $('duration'),
+    customEndRow: $('custom-end-row'),
+    customEnd: $('custom-end'),
+    endPreview: $('booking-end-preview'),
+    bookingError: $('booking-error'),
+    bookingCancelBtn: $('booking-cancel-btn'),
+    bookingSaveBtn: $('booking-save-btn')
   };
 
   // ---------- Daty ----------
@@ -81,6 +96,14 @@
     return longDateFmt.format(start) + ', ' + fmtTime(start) + '–' + fmtTime(end);
   }
 
+  function durationLabel(minutes) {
+    var h = Math.floor(minutes / 60);
+    var m = minutes % 60;
+    if (h && m) return h + ' h ' + m + ' min';
+    if (h) return h + ' h';
+    return m + ' min';
+  }
+
   // ---------- API ----------
 
   // Zwraca { ok, status, data, network } — nigdy nie rzuca.
@@ -113,7 +136,8 @@
       return request('GET', '/resources/' + encodeURIComponent(resourceId) + '/bookings' +
         '?from=' + encodeURIComponent(from.toISOString()) +
         '&to=' + encodeURIComponent(to.toISOString()));
-    }
+    },
+    createBooking: function (payload) { return request('POST', '/bookings', payload); }
   };
 
   // ---------- Komunikaty błędów ----------
@@ -376,6 +400,8 @@
         btn.setAttribute('aria-label', 'Zarezerwuj: ' + fmtRange(slotStart, slotEnd));
         if (!hasResource || slotStart.getTime() < now.getTime()) {
           btn.disabled = true;
+        } else {
+          btn.addEventListener('click', openBookingDialog.bind(null, slotStart));
         }
         col.appendChild(btn);
       }
@@ -421,6 +447,113 @@
     return block;
   }
 
+  // ---------- Dialog rezerwacji ----------
+
+  function openBookingDialog(slotStart) {
+    state.pendingSlotStart = slotStart;
+    hideErrorBox(el.bookingError);
+    var res = currentResource();
+    el.bookingSummary.textContent = (res ? res.name + ', ' : '') + longDateFmt.format(slotStart) + ', od ' + fmtTime(slotStart);
+    el.bookedBy.value = readStorage(NAME_KEY) || '';
+    el.bookingTitle.value = '';
+    el.duration.value = '30';
+    var defEnd = Math.min(minutesOfDay(slotStart) + 60, DAY_END_MIN);
+    el.customEnd.value = pad2(Math.floor(defEnd / 60)) + ':' + pad2(defEnd % 60);
+    el.customEnd.min = hhmm(minutesOfDay(slotStart) + 15);
+    updateDurationUi();
+    el.bookingSaveBtn.disabled = false;
+    el.bookingDialog.showModal();
+    (el.bookedBy.value ? el.bookingTitle : el.bookedBy).focus();
+  }
+
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  function hhmm(minutes) { return pad2(Math.floor(minutes / 60)) + ':' + pad2(minutes % 60); }
+
+  // Zwraca Date końca albo null, gdy wybrana własna godzina jest niepoprawna.
+  function computeEnd() {
+    var start = state.pendingSlotStart;
+    if (!start) return null;
+    if (el.duration.value === 'custom') {
+      var m = /^(\d{1,2}):(\d{2})/.exec(el.customEnd.value);
+      if (!m) return null;
+      return atMinutes(start, parseInt(m[1], 10) * 60 + parseInt(m[2], 10));
+    }
+    return new Date(start.getTime() + parseInt(el.duration.value, 10) * 60000);
+  }
+
+  function updateDurationUi() {
+    el.customEndRow.hidden = el.duration.value !== 'custom';
+    var start = state.pendingSlotStart;
+    var end = computeEnd();
+    if (!start || !end || end <= start) {
+      el.endPreview.textContent = el.duration.value === 'custom' ? 'Podaj godzinę końca późniejszą niż początek.' : '';
+      return;
+    }
+    el.endPreview.textContent = 'Termin: ' + fmtTime(start) + '–' + fmtTime(end) +
+      ' (' + durationLabel(Math.round((end - start) / 60000)) + ')';
+  }
+
+  function submitBooking(ev) {
+    ev.preventDefault();
+    hideErrorBox(el.bookingError);
+
+    var start = state.pendingSlotStart;
+    var end = computeEnd();
+    var name = el.bookedBy.value.trim();
+    var title = el.bookingTitle.value.trim();
+
+    var clientErrors = [];
+    if (!name) clientErrors.push('Imię jest wymagane.');
+    if (!end || end <= start) clientErrors.push('Godzina końca musi być późniejsza niż początek.');
+    if (clientErrors.length) {
+      showErrorBox(el.bookingError, { title: 'Popraw formularz.', lines: clientErrors });
+      (name ? el.customEnd : el.bookedBy).focus();
+      return;
+    }
+
+    writeStorage(NAME_KEY, name);
+    el.bookingSaveBtn.disabled = true;
+
+    api.createBooking({
+      resourceId: state.resourceId,
+      bookedBy: name,
+      title: title || null,
+      startUtc: start.toISOString(),
+      endUtc: end.toISOString()
+    }).then(function (res) {
+      el.bookingSaveBtn.disabled = false;
+      if (res.ok) {
+        el.bookingDialog.close();
+        loadWeek();
+        return;
+      }
+      var info = describeProblem(res);
+      if (res.status === 409) {
+        // Odśwież tydzień, żeby było widać kolidującą rezerwację; dopisz jej szczegóły.
+        loadWeek().then(function () {
+          var extra = [];
+          var cid = res.data && res.data.conflictingBookingId;
+          var c = cid ? findBooking(cid) : null;
+          if (c) {
+            extra.push('Zajęte: ' + fmtTime(c.start) + '–' + fmtTime(c.end) + ', ' + c.bookedBy + (c.title ? ' (' + c.title + ')' : '') + '.');
+          }
+          showErrorBox(el.bookingError, info, extra);
+        });
+        showErrorBox(el.bookingError, info);
+        return;
+      }
+      if (res.status === 404) loadWeek();
+      showErrorBox(el.bookingError, info);
+    });
+  }
+
+  function findBooking(id) {
+    for (var i = 0; i < state.bookings.length; i++) {
+      if (state.bookings[i].id === id) return state.bookings[i];
+    }
+    return null;
+  }
+
   // ---------- localStorage ----------
 
   function readStorage(key) {
@@ -452,6 +585,11 @@
     state.weekStart = startOfWeek(new Date());
     loadWeek();
   });
+
+  el.duration.addEventListener('change', updateDurationUi);
+  el.customEnd.addEventListener('input', updateDurationUi);
+  el.bookingForm.addEventListener('submit', submitBooking);
+  el.bookingCancelBtn.addEventListener('click', function () { el.bookingDialog.close(); });
 
   try {
     el.tzName.textContent = Intl.DateTimeFormat().resolvedOptions().timeZone || 'lokalna';
