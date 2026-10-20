@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RoomBooking: rezerwacje sal i biurek</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>RoomBooking</h1>
+  </header>
+
+  <main>
+    <section class="toolbar" aria-label="Wybór zasobu i tygodnia">
+      <div class="field-inline">
+        <label for="resource-select">Zasób</label>
+        <select id="resource-select" disabled>
+          <option value="">Ładowanie…</option>
+        </select>
+      </div>
+      <div class="week-nav">
+        <button type="button" id="prev-week" aria-label="Poprzedni tydzień">&#8249;</button>
+        <button type="button" id="today-btn">Dziś</button>
+        <button type="button" id="next-week" aria-label="Następny tydzień">&#8250;</button>
+        <span id="week-range" class="week-range" aria-live="polite"></span>
+      </div>
+    </section>
+
+    <div id="status" class="status" role="status" aria-live="polite" hidden></div>
+
+    <div class="grid-scroll">
+      <div id="week-grid" class="week-grid" aria-label="Widok tygodnia"></div>
+    </div>
+    <p class="hint">Godziny w strefie: <span id="tz-name"></span>.</p>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
