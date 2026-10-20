@@ -32,7 +32,7 @@
     <div class="grid-scroll">
       <div id="week-grid" class="week-grid" aria-label="Widok tygodnia"></div>
     </div>
-    <p class="hint">Kliknij wolny slot, aby zarezerwować. Godziny w strefie: <span id="tz-name"></span>.</p>
+    <p class="hint">Kliknij wolny slot, aby zarezerwować. Kliknij rezerwację, aby zobaczyć szczegóły. Godziny w strefie: <span id="tz-name"></span>.</p>
   </main>
 
   <dialog id="booking-dialog" aria-labelledby="booking-dialog-title">
@@ -70,6 +70,24 @@
         <button type="submit" id="booking-save-btn" class="primary">Zarezerwuj</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="details-dialog" aria-labelledby="details-dialog-title">
+    <div class="dialog-body">
+      <h2 id="details-dialog-title">Szczegóły rezerwacji</h2>
+      <dl class="details">
+        <dt>Zasób</dt><dd id="details-resource"></dd>
+        <dt>Kto</dt><dd id="details-booked-by"></dd>
+        <dt>Tytuł</dt><dd id="details-title"></dd>
+        <dt>Kiedy</dt><dd id="details-when"></dd>
+        <dt>Utworzono</dt><dd id="details-created"></dd>
+      </dl>
+      <div id="details-error" class="error-box" role="alert" hidden></div>
+      <div class="dialog-actions">
+        <button type="button" id="details-close-btn" class="secondary">Zamknij</button>
+        <button type="button" id="details-delete-btn" class="danger">Anuluj rezerwację</button>
+      </div>
+    </div>
   </dialog>
 
   <script src="app.js"></script>

@@ -31,7 +31,8 @@
     weekStart: startOfWeek(new Date()),
     bookings: [],
     loadSeq: 0,
-    pendingSlotStart: null
+    pendingSlotStart: null,
+    selectedBooking: null
   };
 
   // ---------- Elementy ----------
@@ -59,7 +60,17 @@
     endPreview: $('booking-end-preview'),
     bookingError: $('booking-error'),
     bookingCancelBtn: $('booking-cancel-btn'),
-    bookingSaveBtn: $('booking-save-btn')
+    bookingSaveBtn: $('booking-save-btn'),
+
+    detailsDialog: $('details-dialog'),
+    detailsResource: $('details-resource'),
+    detailsBookedBy: $('details-booked-by'),
+    detailsTitle: $('details-title'),
+    detailsWhen: $('details-when'),
+    detailsCreated: $('details-created'),
+    detailsError: $('details-error'),
+    detailsCloseBtn: $('details-close-btn'),
+    detailsDeleteBtn: $('details-delete-btn')
   };
 
   // ---------- Daty ----------
@@ -137,7 +148,8 @@
         '?from=' + encodeURIComponent(from.toISOString()) +
         '&to=' + encodeURIComponent(to.toISOString()));
     },
-    createBooking: function (payload) { return request('POST', '/bookings', payload); }
+    createBooking: function (payload) { return request('POST', '/bookings', payload); },
+    cancelBooking: function (id) { return request('DELETE', '/bookings/' + encodeURIComponent(id)); }
   };
 
   // ---------- Komunikaty błędów ----------
@@ -444,6 +456,7 @@
     block.title = fmtTime(b.start) + '–' + fmtTime(b.end) + ' ' + b.bookedBy + (b.title ? ': ' + b.title : '');
     block.setAttribute('aria-label', 'Rezerwacja ' + fmtRange(b.start, b.end) + ', ' + b.bookedBy +
       (b.title ? ', ' + b.title : ''));
+    block.addEventListener('click', openDetailsDialog.bind(null, b));
     return block;
   }
 
@@ -554,6 +567,45 @@
     return null;
   }
 
+  // ---------- Dialog szczegółów ----------
+
+  function openDetailsDialog(b) {
+    state.selectedBooking = b;
+    hideErrorBox(el.detailsError);
+    var res = currentResource();
+    el.detailsResource.textContent = res ? res.name : '';
+    el.detailsBookedBy.textContent = b.bookedBy;
+    el.detailsTitle.textContent = b.title || '(brak)';
+    el.detailsWhen.textContent = fmtRange(b.start, b.end);
+    el.detailsCreated.textContent = b.createdAt && !isNaN(b.createdAt.getTime()) ? dateTimeFmt.format(b.createdAt) : '–';
+    var ended = b.end.getTime() <= Date.now();
+    el.detailsDeleteBtn.hidden = ended;
+    el.detailsDeleteBtn.disabled = false;
+    el.detailsDialog.showModal();
+    el.detailsCloseBtn.focus();
+  }
+
+  function cancelSelectedBooking() {
+    var b = state.selectedBooking;
+    if (!b) return;
+    hideErrorBox(el.detailsError);
+    el.detailsDeleteBtn.disabled = true;
+    api.cancelBooking(b.id).then(function (res) {
+      if (res.ok) {
+        el.detailsDialog.close();
+        loadWeek();
+        return;
+      }
+      showErrorBox(el.detailsError, describeProblem(res));
+      if (res.status === 404 || res.status === 409) {
+        el.detailsDeleteBtn.hidden = true;
+        loadWeek();
+      } else {
+        el.detailsDeleteBtn.disabled = false;
+      }
+    });
+  }
+
   // ---------- localStorage ----------
 
   function readStorage(key) {
@@ -590,6 +642,9 @@
   el.customEnd.addEventListener('input', updateDurationUi);
   el.bookingForm.addEventListener('submit', submitBooking);
   el.bookingCancelBtn.addEventListener('click', function () { el.bookingDialog.close(); });
+
+  el.detailsCloseBtn.addEventListener('click', function () { el.detailsDialog.close(); });
+  el.detailsDeleteBtn.addEventListener('click', cancelSelectedBooking);
 
   try {
     el.tzName.textContent = Intl.DateTimeFormat().resolvedOptions().timeZone || 'lokalna';
