@@ -416,11 +416,13 @@
         var btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'slot' + (i % 2 === 1 ? ' full-hour' : '');
-        btn.setAttribute('aria-label', 'Zarezerwuj: ' + fmtRange(slotStart, slotEnd));
-        if (!hasResource || slotStart.getTime() < now.getTime()) {
+        // Gdy początek slotu minął, ale jego druga połowa (od :15/:45) jeszcze nie, rezerwacja startuje od niej.
+        var bookStart = slotStart.getTime() < now.getTime() ? new Date(slotStart.getTime() + 15 * 60000) : slotStart;
+        btn.setAttribute('aria-label', 'Zarezerwuj: ' + fmtRange(bookStart, slotEnd));
+        if (!hasResource || bookStart.getTime() < now.getTime()) {
           btn.disabled = true;
         } else {
-          btn.addEventListener('click', openBookingDialog.bind(null, slotStart));
+          btn.addEventListener('click', openBookingDialog.bind(null, bookStart));
         }
         col.appendChild(btn);
       }
@@ -486,6 +488,7 @@
     Array.prototype.forEach.call(el.duration.options, function (opt) {
       opt.disabled = opt.value !== 'custom' && startMin + parseInt(opt.value, 10) > DAY_END_MIN;
     });
+    if (el.duration.options[el.duration.selectedIndex].disabled) el.duration.value = 'custom'; // np. start 19:45
     updateDurationUi();
     el.bookingSaveBtn.disabled = false;
     el.bookingDialog.showModal();
