@@ -232,17 +232,36 @@ public class ResourcesEndpointsTests
         }
     }
 
-    [Fact]
-    public async Task GetBookings_Exactly31Days_IsAllowed()
+    // CONTRACT.md: limit 31 dni liczony w czasie lokalnym biura (dni kalendarzowe).
+    [Theory]
+    [InlineData("2026-11-01", "2026-12-02")] // bez zmiany czasu: dokładnie 31 d
+    [InlineData("2026-10-01", "2026-11-01")] // przez zmianę czasu 25.10: 31 d + 1 h bezwzględnie, nadal dozwolone
+    [InlineData("2026-03-01", "2026-04-01")] // przez zmianę czasu 29.03: 31 d - 1 h bezwzględnie
+    public async Task GetBookings_Exactly31CalendarDays_IsAllowed(string from, string to)
     {
-        // Zakres bez zmiany czasu (oba końce CET), żeby nie zależeć od interpretacji '31 dni' przy DST.
         await using var factory = new RoomBookingApiFactory();
         var client = factory.CreateClient();
         var alfa = await client.GetResourceIdAsync("Alfa");
 
-        var bookings = await client.GetBookingsAsync(alfa, "2026-11-01", "2026-12-02");
+        var bookings = await client.GetBookingsAsync(alfa, from, to);
 
         Assert.Empty(bookings);
+    }
+
+    [Fact]
+    public async Task GetBookings_31CalendarDaysAcrossDstChange_IncludesBookingsAtTheEdges()
+    {
+        await using var factory = new RoomBookingApiFactory();
+        var client = factory.CreateClient();
+        var alfa = await client.GetResourceIdAsync("Alfa");
+
+        // 2026-10-21 (CEST) i 2026-10-31 19:00-20:00 lokalnie (CET) = 18:00Z-19:00Z, w zakresie 01.10-01.11
+        var inside = await client.CreateBookingAsync(alfa, Utc(2026, 10, 21, 8), Utc(2026, 10, 21, 9));
+        var lastDay = await client.CreateBookingAsync(alfa, Utc(2026, 10, 31, 18), Utc(2026, 10, 31, 19));
+
+        var bookings = await client.GetBookingsAsync(alfa, "2026-10-01", "2026-11-01");
+
+        Assert.Equal([inside.Id, lastDay.Id], bookings.Select(b => b.Id));
     }
 
     internal static DateTimeOffset Utc(int year, int month, int day, int hour, int minute = 0) =>

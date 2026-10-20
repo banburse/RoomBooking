@@ -160,7 +160,7 @@ public class BookingsEndpointsTests
     }
 
     [Fact]
-    public async Task PostBooking_TimeWithoutOffset_Returns400()
+    public async Task PostBooking_TimeWithoutOffset_Returns400UnderBothTimeKeys()
     {
         await using var factory = new RoomBookingApiFactory();
         var client = factory.CreateClient();
@@ -175,7 +175,38 @@ public class BookingsEndpointsTests
             endUtc = "2026-10-21T09:00:00",
         });
 
-        await response.ReadProblemAsync(HttpStatusCode.BadRequest);
+        var problem = await response.ReadProblemAsync(HttpStatusCode.BadRequest);
+        problem.AssertHasError("startUtc");
+        problem.AssertHasError("endUtc");
+    }
+
+    // CONTRACT.md: brak, zły format lub brak offsetu w czasie -> błąd pod kluczem tego pola.
+    [Theory]
+    [InlineData("2026-10-21T08:00:00", "2026-10-21T09:00:00Z", "startUtc", "endUtc")] // start bez offsetu
+    [InlineData("2026-10-21T08:00:00Z", "2026-10-21T09:00:00", "endUtc", "startUtc")] // end bez offsetu
+    [InlineData("jutro rano", "2026-10-21T09:00:00Z", "startUtc", "endUtc")]          // zły format
+    [InlineData("2026-10-21T08:00:00Z", "", "endUtc", "startUtc")]                    // pusty
+    [InlineData(null, "2026-10-21T09:00:00Z", "startUtc", "endUtc")]                  // brak
+    public async Task PostBooking_InvalidTimeField_Returns400UnderThatFieldOnly(
+        string? startUtc, string endUtc, string expectedKey, string otherKey)
+    {
+        await using var factory = new RoomBookingApiFactory();
+        var client = factory.CreateClient();
+        var alfa = await client.GetResourceIdAsync("Alfa");
+
+        using var response = await client.PostAsJsonAsync("/bookings", new
+        {
+            resourceId = alfa,
+            bookedBy = "Jan",
+            title = (string?)null,
+            startUtc,
+            endUtc,
+        });
+
+        var problem = await response.ReadProblemAsync(HttpStatusCode.BadRequest);
+        problem.AssertHasError(expectedKey);
+        Assert.False(problem.GetProperty("errors").TryGetProperty(otherKey, out _),
+            $"Poprawne pole '{otherKey}' nie powinno mieć błędu: {problem}");
     }
 
     [Fact]
