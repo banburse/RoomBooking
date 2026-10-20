@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using RoomBooking.Api.Data;
@@ -9,6 +10,10 @@ namespace RoomBooking.Api.Endpoints;
 
 public static class ResourceEndpoints
 {
+    /// <summary>Kolejność nazw po polsku i bez wielkości liter (SQLite BINARY sortuje źle).</summary>
+    private static readonly StringComparer ResourceNameComparer =
+        StringComparer.Create(CultureInfo.GetCultureInfo("pl-PL"), ignoreCase: true);
+
     public static IEndpointRouteBuilder MapResourceEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/resources").WithTags("Resources");
@@ -23,6 +28,12 @@ public static class ResourceEndpoints
             .Produces<ResourceResponse>(StatusCodes.Status201Created)
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status409Conflict);
+
+        // Stały segment "available" ma pierwszeństwo, a {id:guid} i tak go nie dopasuje.
+        group.MapGet("/available", ListAvailableResources)
+            .WithName("ListAvailableResources")
+            .Produces<ResourceResponse[]>()
+            .ProducesValidationProblem();
 
         group.MapGet("/{id:guid}/bookings", ListResourceBookings)
             .WithName("ListResourceBookings")
@@ -58,6 +69,70 @@ public static class ResourceEndpoints
             .ToListAsync(cancellationToken);
 
         return TypedResults.Ok(resources);
+    }
+
+    // 6. GET /resources/available?start=...&end=...&type=...&minCapacity=...
+    private static async Task<IResult> ListAvailableResources(
+        string? start,
+        string? end,
+        string? type,
+        string? minCapacity,
+        IBookingPolicy policy,
+        RoomBookingDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var validated = RequestValidator.ValidateAvailabilityQuery(start, end, type, minCapacity);
+        if (!validated.IsValid)
+        {
+            return Problems.Validation(validated.Errors!);
+        }
+
+        var query = validated.Value!;
+
+        // Te same reguły czasowe co przy rezerwacji; pola tekstowe policy nie sprawdza.
+        var rules = policy.Validate(new BookingRequest(Guid.Empty, string.Empty, null, query.StartUtc, query.EndUtc));
+        if (!rules.IsValid)
+        {
+            return Problems.Validation(rules.Errors.ToDictionary(
+                kv => kv.Key switch { "startUtc" => "start", "endUtc" => "end", _ => kv.Key },
+                kv => kv.Value,
+                StringComparer.Ordinal));
+        }
+
+        var candidatesQuery = db.Resources.AsNoTracking().Where(r => r.IsActive);
+        if (query.Type is { } resourceType)
+        {
+            candidatesQuery = candidatesQuery.Where(r => r.Type == resourceType);
+        }
+
+        if (query.MinCapacity is { } capacity)
+        {
+            candidatesQuery = candidatesQuery.Where(r => r.Capacity >= capacity);
+        }
+
+        var candidates = await candidatesQuery.ToListAsync(cancellationToken);
+        var candidateIds = candidates.Select(r => r.Id).ToList();
+
+        // Jedno zapytanie dla wszystkich kandydatów (bez N+1). Filtr nakładania w SQL to tylko
+        // wstępne zawężenie; o kolizji rozstrzyga IBookingPolicy.FindConflict.
+        var slotsByResource = (await db.Bookings.AsNoTracking()
+                .Where(b => candidateIds.Contains(b.ResourceId)
+                    && b.CancelledAt == null
+                    && b.StartUtc < query.EndUtc
+                    && b.EndUtc > query.StartUtc)
+                .Select(b => new { b.ResourceId, Slot = new BookingSlot(b.Id, b.StartUtc, b.EndUtc, false) })
+                .ToListAsync(cancellationToken))
+            .ToLookup(x => x.ResourceId, x => x.Slot);
+
+        var available = candidates
+            .Where(r => policy.FindConflict(query.StartUtc, query.EndUtc, slotsByResource[r.Id]) is null)
+            .OrderBy(r => r.Capacity)
+            .ThenBy(r => r.Type == ResourceType.Room ? 0 : 1)
+            .ThenBy(r => r.Name, ResourceNameComparer)
+            .Select(ResourceResponse.From)
+            .ToList();
+
+        return TypedResults.Ok(available);
     }
 
     // 2. POST /resources

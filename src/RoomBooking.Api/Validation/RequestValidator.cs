@@ -31,10 +31,14 @@ public sealed record NewResource(string Name, ResourceType Type, int Capacity);
 
 public sealed record BookingRange(DateTimeOffset FromUtc, DateTimeOffset ToUtc);
 
+public sealed record AvailabilityQuery(DateTimeOffset StartUtc, DateTimeOffset EndUtc, ResourceType? Type, int? MinCapacity);
+
 /// <summary>Jedyne miejsce walidacji wejścia API (body i parametry zapytań).</summary>
 public sealed partial class RequestValidator
 {
     public const int MaxRangeDays = 31;
+    public const int MinCapacity = 1;
+    public const int MaxCapacity = 50;
 
     private readonly TimeZoneInfo _officeZone;
 
@@ -85,9 +89,9 @@ public sealed partial class RequestValidator
         {
             errors.Add("capacity", "Pojemność jest wymagana.");
         }
-        else if (request.Capacity is < 1 or > 50)
+        else if (request.Capacity is < MinCapacity or > MaxCapacity)
         {
-            errors.Add("capacity", "Pojemność musi być w zakresie 1–50.");
+            errors.Add("capacity", $"Pojemność musi być w zakresie {MinCapacity}–{MaxCapacity}.");
         }
 
         return errors.HasErrors
@@ -132,6 +136,49 @@ public sealed partial class RequestValidator
         return errors.HasErrors
             ? Validated<BookingRequest>.Fail(errors.ToDictionary())
             : Validated<BookingRequest>.Ok(new BookingRequest(resourceId, bookedBy!, title, start, end));
+    }
+
+    public static Validated<AvailabilityQuery> ValidateAvailabilityQuery(
+        string? start,
+        string? end,
+        string? type,
+        string? minCapacity)
+    {
+        var errors = new ErrorBag();
+
+        var startUtc = ParseRequiredInstant(start, "start", "Parametr 'start' jest wymagany.", errors);
+        var endUtc = ParseRequiredInstant(end, "end", "Parametr 'end' jest wymagany.", errors);
+
+        ResourceType? resourceType = null;
+        if (type is not null)
+        {
+            if (TryParseResourceType(type, out var parsed))
+            {
+                resourceType = parsed;
+            }
+            else
+            {
+                errors.Add("type", Messages.UnknownType);
+            }
+        }
+
+        int? capacity = null;
+        if (minCapacity is not null)
+        {
+            if (int.TryParse(minCapacity, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed)
+                && parsed is >= MinCapacity and <= MaxCapacity)
+            {
+                capacity = parsed;
+            }
+            else
+            {
+                errors.Add("minCapacity", $"Parametr 'minCapacity' musi być liczbą całkowitą {MinCapacity}–{MaxCapacity}.");
+            }
+        }
+
+        return errors.HasErrors
+            ? Validated<AvailabilityQuery>.Fail(errors.ToDictionary())
+            : Validated<AvailabilityQuery>.Ok(new AvailabilityQuery(startUtc, endUtc, resourceType, capacity));
     }
 
     public Validated<BookingRange> ValidateBookingRange(string? from, string? to)
