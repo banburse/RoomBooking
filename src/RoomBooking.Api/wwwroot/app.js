@@ -1,6 +1,7 @@
 /*
  * RoomBooking GUI: vanilla JS, bez bibliotek.
  * Kontrakt API: CONTRACT.md. Wszystkie dane z API wstawiane wyłącznie przez textContent.
+ * Tryb demo bez backendu: dodaj ?mock=1 do adresu strony.
  */
 (function () {
   'use strict';
@@ -15,6 +16,8 @@
   var NAME_KEY = 'roombooking.bookedBy';
   var RESOURCE_KEY = 'roombooking.resourceId';
   var COLOR_CLASSES = 6;
+
+  var MOCK = /(?:^|[?&])mock=1(?:&|$)/.test(window.location.search);
 
   var timeFmt = new Intl.DateTimeFormat('pl-PL', { hour: '2-digit', minute: '2-digit' });
   var dayHeadFmt = new Intl.DateTimeFormat('pl-PL', { weekday: 'short' });
@@ -48,6 +51,7 @@
     status: $('status'),
     grid: $('week-grid'),
     tzName: $('tz-name'),
+    mockBadge: $('mock-badge'),
 
     bookingDialog: $('booking-dialog'),
     bookingForm: $('booking-form'),
@@ -119,6 +123,8 @@
 
   // Zwraca { ok, status, data, network } — nigdy nie rzuca.
   function request(method, url, body) {
+    if (MOCK) return mockRequest(method, url, body);
+
     var opts = { method: method, headers: { 'Accept': 'application/json, application/problem+json' } };
     if (body !== undefined) {
       opts.headers['Content-Type'] = 'application/json';
@@ -616,6 +622,147 @@
     try { window.localStorage.setItem(key, value); } catch (e) { /* ignoruj */ }
   }
 
+  // ---------- Mock API (?mock=1) ----------
+
+  var mockDb = null;
+
+  function mockInit() {
+    function guid() {
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+        var r = Math.random() * 16 | 0;
+        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+      });
+    }
+    var resources = [
+      ['Alfa', 'Room', 8], ['Beta', 'Room', 4], ['Gamma', 'Room', 12],
+      ['D1', 'Desk', 1], ['D2', 'Desk', 1], ['D3', 'Desk', 1], ['D4', 'Desk', 1]
+    ].map(function (r) { return { id: guid(), name: r[0], type: r[1], capacity: r[2], isActive: true }; });
+
+    var mon = startOfWeek(new Date());
+    var alfa = resources[0].id;
+    function mk(resId, dayOffset, startMin, endMin, who, title) {
+      var day = addDays(mon, dayOffset);
+      return {
+        id: guid(), resourceId: resId, bookedBy: who, title: title,
+        startUtc: atMinutes(day, startMin).toISOString(), endUtc: atMinutes(day, endMin).toISOString(),
+        createdAt: new Date().toISOString(), cancelled: false
+      };
+    }
+    var bookings = [
+      mk(alfa, 0, 9 * 60, 10 * 60, 'Jan', 'Daily'),
+      mk(alfa, 1, 10 * 60 + 15, 11 * 60 + 45, 'Anna', 'Przegląd sprintu'),
+      mk(alfa, 2, 13 * 60, 15 * 60, 'Piotr', null),
+      mk(alfa, 3, 8 * 60, 8 * 60 + 30, '<b>Test</b>', '<img src=x>'),
+      mk(alfa, 4, 16 * 60 + 45, 19 * 60, 'Ewa', 'Warsztaty z bardzo długim tytułem, który się nie zmieści'),
+      mk(resources[3].id, 2, 8 * 60, 16 * 60, 'Marek', 'Praca przy biurku')
+    ];
+    mockDb = { resources: resources, bookings: bookings, guid: guid };
+  }
+
+  function mockProblem(status, title, detail, errors, extra) {
+    var p = { type: 'about:blank', title: title, status: status };
+    if (detail) p.detail = detail;
+    if (errors) p.errors = errors;
+    if (extra) Object.keys(extra).forEach(function (k) { p[k] = extra[k]; });
+    return { ok: false, status: status, data: p };
+  }
+
+  function mockPublic(b) {
+    return { id: b.id, resourceId: b.resourceId, bookedBy: b.bookedBy, title: b.title,
+      startUtc: b.startUtc, endUtc: b.endUtc, createdAt: b.createdAt };
+  }
+
+  function mockRequest(method, url, body) {
+    if (!mockDb) mockInit();
+    var result;
+    try {
+      result = mockRoute(method, url, body ? JSON.parse(JSON.stringify(body)) : body);
+    } catch (e) {
+      result = mockProblem(500, 'Błąd mocka.', String(e));
+    }
+    return new Promise(function (resolve) { setTimeout(function () { resolve(result); }, 150); });
+  }
+
+  function mockRoute(method, url, body) {
+    var parts = url.split('?');
+    var path = parts[0];
+    var query = {};
+    (parts[1] || '').split('&').forEach(function (kv) {
+      if (!kv) return;
+      var i = kv.indexOf('=');
+      query[decodeURIComponent(kv.slice(0, i))] = decodeURIComponent(kv.slice(i + 1));
+    });
+    var m;
+
+    if (method === 'GET' && path === '/resources') {
+      return { ok: true, status: 200, data: mockDb.resources.filter(function (r) { return r.isActive; }) };
+    }
+
+    if (method === 'GET' && (m = /^\/resources\/([^/]+)\/bookings$/.exec(path))) {
+      var rid = decodeURIComponent(m[1]);
+      var from = new Date(query.from), to = new Date(query.to);
+      if (isNaN(from) || isNaN(to)) return mockProblem(400, 'Błąd walidacji.', null, { from: ['Nieprawidłowy zakres dat.'] });
+      if (!mockDb.resources.some(function (r) { return r.id === rid; })) {
+        return mockProblem(404, 'Nie znaleziono.', 'Zasób ' + rid + ' nie istnieje.');
+      }
+      var list = mockDb.bookings.filter(function (b) {
+        return !b.cancelled && b.resourceId === rid && new Date(b.startUtc) < to && new Date(b.endUtc) > from;
+      }).sort(function (a, b) { return new Date(a.startUtc) - new Date(b.startUtc); }).map(mockPublic);
+      return { ok: true, status: 200, data: list };
+    }
+
+    if (method === 'POST' && path === '/bookings') {
+      var errors = {};
+      var name = (body.bookedBy || '').trim();
+      if (!name) errors.bookedBy = ['Imię jest wymagane.'];
+      else if (name.length > 60) errors.bookedBy = ['Imię może mieć maksymalnie 60 znaków.'];
+      if (body.title && body.title.length > 100) errors.title = ['Tytuł może mieć maksymalnie 100 znaków.'];
+      if (Object.keys(errors).length) return mockProblem(400, 'Błąd walidacji.', null, errors);
+
+      var res = mockDb.resources.filter(function (r) { return r.id === body.resourceId && r.isActive; })[0];
+      if (!res) return mockProblem(404, 'Nie znaleziono.', 'Zasób ' + body.resourceId + ' nie istnieje.');
+
+      var s = new Date(body.startUtc), e = new Date(body.endUtc);
+      var dur = (e - s) / 60000;
+      var terr = {};
+      if (!(s < e)) terr.endUtc = ['Koniec musi być późniejszy niż początek.'];
+      else if (dur < 15) terr.endUtc = ['Rezerwacja musi trwać co najmniej 15 minut.'];
+      else if (dur > 480) terr.endUtc = ['Rezerwacja może trwać maksymalnie 8 godzin.'];
+      if (s.getMinutes() % 15 || s.getSeconds()) terr.startUtc = ['Początek musi być wyrównany do 15 minut.'];
+      if (e.getMinutes() % 15 || e.getSeconds()) terr.endUtc = (terr.endUtc || []).concat(['Koniec musi być wyrównany do 15 minut.']);
+      if (minutesOfDay(s) < DAY_START_MIN || !sameDay(s, e) || minutesOfDay(e) > DAY_END_MIN) {
+        terr.startUtc = (terr.startUtc || []).concat(['Rezerwacja musi mieścić się w godzinach pracy 08:00–20:00 jednego dnia.']);
+      }
+      if (s < new Date()) terr.startUtc = (terr.startUtc || []).concat(['Nie można rezerwować w przeszłości.']);
+      if (Object.keys(terr).length) return mockProblem(400, 'Błąd walidacji.', null, terr);
+
+      var conflict = mockDb.bookings.filter(function (b) {
+        return !b.cancelled && b.resourceId === res.id && new Date(b.startUtc) < e && new Date(b.endUtc) > s;
+      })[0];
+      if (conflict) {
+        return mockProblem(409, 'Kolizja rezerwacji.', 'Termin koliduje z istniejącą rezerwacją.', null,
+          { conflictingBookingId: conflict.id });
+      }
+      var nb = {
+        id: mockDb.guid(), resourceId: res.id, bookedBy: name, title: (body.title || '').trim() || null,
+        startUtc: s.toISOString(), endUtc: e.toISOString(), createdAt: new Date().toISOString(), cancelled: false
+      };
+      mockDb.bookings.push(nb);
+      return { ok: true, status: 201, data: mockPublic(nb) };
+    }
+
+    if (method === 'DELETE' && (m = /^\/bookings\/([^/]+)$/.exec(path))) {
+      var id = decodeURIComponent(m[1]);
+      var bk = mockDb.bookings.filter(function (b) { return b.id === id && !b.cancelled; })[0];
+      if (!bk) return mockProblem(404, 'Nie znaleziono.', 'Rezerwacja ' + id + ' nie istnieje lub została już anulowana.');
+      if (new Date(bk.endUtc) <= new Date()) return mockProblem(409, 'Konflikt.', 'Rezerwacja już się zakończyła.');
+      bk.cancelled = true;
+      return { ok: true, status: 204, data: null };
+    }
+
+    return mockProblem(404, 'Nie znaleziono.', 'Brak endpointu ' + method + ' ' + path + ' w mocku.');
+  }
+
   // ---------- Zdarzenia i start ----------
 
   el.resourceSelect.addEventListener('change', function () {
@@ -646,11 +793,22 @@
   el.detailsCloseBtn.addEventListener('click', function () { el.detailsDialog.close(); });
   el.detailsDeleteBtn.addEventListener('click', cancelSelectedBooking);
 
+  // Klik w tło dialogu zamyka go.
+  [el.bookingDialog, el.detailsDialog].forEach(function (dlg) {
+    dlg.addEventListener('click', function (ev) { if (ev.target === dlg) dlg.close(); });
+  });
+
   try {
     el.tzName.textContent = Intl.DateTimeFormat().resolvedOptions().timeZone || 'lokalna';
   } catch (e) {
     el.tzName.textContent = 'lokalna';
   }
+  el.mockBadge.hidden = !MOCK;
+
+  // Co minutę przerysuj siatkę, żeby wyszarzanie przeszłych slotów było aktualne.
+  setInterval(function () {
+    if (!el.bookingDialog.open && !el.detailsDialog.open) renderGrid();
+  }, 60000);
 
   renderWeekLabel();
   renderGrid();
