@@ -31,6 +31,8 @@ public sealed record NewResource(string Name, ResourceType Type, int Capacity);
 
 public sealed record BookingRange(DateTimeOffset FromUtc, DateTimeOffset ToUtc);
 
+public sealed record BookingChange(DateTimeOffset StartUtc, DateTimeOffset EndUtc, string? Title);
+
 public sealed record AvailabilityQuery(DateTimeOffset StartUtc, DateTimeOffset EndUtc, ResourceType? Type, int? MinCapacity);
 
 /// <summary>Jedyne miejsce walidacji wejścia API (body i parametry zapytań).</summary>
@@ -124,19 +126,42 @@ public sealed partial class RequestValidator
             errors.Add("bookedBy", $"Imię może mieć maksymalnie {Booking.BookedByMaxLength} znaków.");
         }
 
-        var title = string.IsNullOrWhiteSpace(request.Title) ? null : request.Title.Trim();
-        if (title is { Length: > Booking.TitleMaxLength })
-        {
-            errors.Add("title", $"Tytuł może mieć maksymalnie {Booking.TitleMaxLength} znaków.");
-        }
-
-        var start = ParseRequiredInstant(request.StartUtc, "startUtc", "Początek rezerwacji jest wymagany.", errors);
-        var end = ParseRequiredInstant(request.EndUtc, "endUtc", "Koniec rezerwacji jest wymagany.", errors);
+        var title = ValidateTitle(request.Title, errors);
+        var (start, end) = ValidateBookingTimes(request.StartUtc, request.EndUtc, errors);
 
         return errors.HasErrors
             ? Validated<BookingRequest>.Fail(errors.ToDictionary())
             : Validated<BookingRequest>.Ok(new BookingRequest(resourceId, bookedBy!, title, start, end));
     }
+
+    /// <summary>PUT /bookings/{id}: te same reguły co w POST dla startUtc, endUtc i title.</summary>
+    public static Validated<BookingChange> ValidateUpdateBooking(UpdateBookingRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var errors = new ErrorBag();
+
+        var title = ValidateTitle(request.Title, errors);
+        var (start, end) = ValidateBookingTimes(request.StartUtc, request.EndUtc, errors);
+
+        return errors.HasErrors
+            ? Validated<BookingChange>.Fail(errors.ToDictionary())
+            : Validated<BookingChange>.Ok(new BookingChange(start, end, title));
+    }
+
+    private static string? ValidateTitle(string? value, ErrorBag errors)
+    {
+        var title = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        if (title is { Length: > Booking.TitleMaxLength })
+        {
+            errors.Add("title", $"Tytuł może mieć maksymalnie {Booking.TitleMaxLength} znaków.");
+        }
+
+        return title;
+    }
+
+    private static (DateTimeOffset Start, DateTimeOffset End) ValidateBookingTimes(string? start, string? end, ErrorBag errors) =>
+        (ParseRequiredInstant(start, "startUtc", "Początek rezerwacji jest wymagany.", errors),
+         ParseRequiredInstant(end, "endUtc", "Koniec rezerwacji jest wymagany.", errors));
 
     public static Validated<AvailabilityQuery> ValidateAvailabilityQuery(
         string? start,

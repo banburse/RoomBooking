@@ -15,6 +15,8 @@ public sealed record CreateBookingRequest(
     string? StartUtc,
     string? EndUtc);
 
+public sealed record UpdateBookingRequest(string? StartUtc, string? EndUtc, string? Title);
+
 // Wyjście wg CONTRACT.md.
 
 public sealed record ResourceResponse(Guid Id, string Name, ResourceType Type, int Capacity, bool IsActive)
