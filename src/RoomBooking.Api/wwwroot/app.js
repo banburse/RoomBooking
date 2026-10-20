@@ -36,7 +36,8 @@
     loadSeq: 0,
     pendingSlotStart: null,
     bookingDialogSeq: 0,
-    selectedBooking: null
+    selectedBooking: null,
+    findSeq: 0
   };
 
   // ---------- Elementy ----------
@@ -75,7 +76,20 @@
     detailsCreated: $('details-created'),
     detailsError: $('details-error'),
     detailsCloseBtn: $('details-close-btn'),
-    detailsDeleteBtn: $('details-delete-btn')
+    detailsDeleteBtn: $('details-delete-btn'),
+
+    findForm: $('find-form'),
+    findDate: $('find-date'),
+    findStart: $('find-start'),
+    findDuration: $('find-duration'),
+    findEndRow: $('find-end-row'),
+    findEnd: $('find-end'),
+    findType: $('find-type'),
+    findCapacity: $('find-capacity'),
+    findSubmit: $('find-submit'),
+    findError: $('find-error'),
+    findInfo: $('find-info'),
+    findResults: $('find-results')
   };
 
   // ---------- Daty ----------
@@ -154,6 +168,12 @@
       return request('GET', '/resources/' + encodeURIComponent(resourceId) + '/bookings' +
         '?from=' + encodeURIComponent(from.toISOString()) +
         '&to=' + encodeURIComponent(to.toISOString()));
+    },
+    findAvailable: function (start, end, type, minCapacity) {
+      var q = '?start=' + encodeURIComponent(start.toISOString()) + '&end=' + encodeURIComponent(end.toISOString());
+      if (type) q += '&type=' + encodeURIComponent(type);
+      if (minCapacity) q += '&minCapacity=' + encodeURIComponent(minCapacity);
+      return request('GET', '/resources/available' + q);
     },
     createBooking: function (payload) { return request('POST', '/bookings', payload); },
     cancelBooking: function (id) { return request('DELETE', '/bookings/' + encodeURIComponent(id)); }
@@ -471,7 +491,9 @@
 
   // ---------- Dialog rezerwacji ----------
 
-  function openBookingDialog(slotStart) {
+  // presetMinutes (opcjonalnie): długość wstępnie wybrana, np. z wyszukiwarki wolnych sal.
+  function openBookingDialog(slotStart, presetMinutes) {
+    if (typeof presetMinutes !== 'number') presetMinutes = 0; // przy kliknięciu w slot drugim argumentem jest zdarzenie
     state.pendingSlotStart = slotStart;
     state.bookingDialogSeq++; // unieważnia odpowiedzi z poprzednich otwarć okienka
     hideErrorBox(el.bookingError);
@@ -480,7 +502,7 @@
     el.bookedBy.value = readStorage(NAME_KEY) || '';
     el.bookingTitle.value = '';
     el.duration.value = '30';
-    var defEnd = Math.min(minutesOfDay(slotStart) + 60, DAY_END_MIN);
+    var defEnd = Math.min(minutesOfDay(slotStart) + (presetMinutes || 60), DAY_END_MIN);
     el.customEnd.value = pad2(Math.floor(defEnd / 60)) + ':' + pad2(defEnd % 60);
     el.customEnd.min = hhmm(minutesOfDay(slotStart) + 15);
     // Wyłącz gotowe długości, które wychodzą poza koniec dnia pracy (np. 2 h od 19:30).
@@ -488,7 +510,10 @@
     Array.prototype.forEach.call(el.duration.options, function (opt) {
       opt.disabled = opt.value !== 'custom' && startMin + parseInt(opt.value, 10) > DAY_END_MIN;
     });
-    if (el.duration.options[el.duration.selectedIndex].disabled) el.duration.value = 'custom'; // np. start 19:45
+    if (presetMinutes) el.duration.value = String(presetMinutes); // brak takiej opcji → selectedIndex -1
+    if (el.duration.selectedIndex < 0 || el.duration.options[el.duration.selectedIndex].disabled) {
+      el.duration.value = 'custom'; // np. start 19:45 albo niestandardowa długość
+    }
     updateDurationUi();
     el.bookingSaveBtn.disabled = false;
     el.bookingDialog.showModal();
@@ -639,6 +664,160 @@
     });
   }
 
+  // ---------- Znajdź wolną salę ----------
+
+  function parseHm(value) {
+    var m = /^(\d{1,2}):(\d{2})/.exec(value || '');
+    return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : null;
+  }
+
+  function parseDateInput(value) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || '');
+    return m ? new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10)) : null;
+  }
+
+  function dateInputValue(d) {
+    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+  }
+
+  function typeLabel(type) {
+    var t = String(type).toLowerCase();
+    if (t === 'room') return 'Sala';
+    if (t === 'desk') return 'Biurko';
+    return String(type);
+  }
+
+  // Domyślny termin: najbliższy pełny kwadrans dziś, a jeśli za późno lub weekend, następny dzień roboczy 08:00.
+  function initFindForm() {
+    var now = new Date();
+    var day = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var start = Math.max(DAY_START_MIN, Math.ceil(minutesOfDay(now) / 15) * 15);
+    if (start + 30 > DAY_END_MIN) { day = addDays(day, 1); start = DAY_START_MIN; }
+    while (day.getDay() === 0 || day.getDay() === 6) { day = addDays(day, 1); start = DAY_START_MIN; }
+    el.findDate.min = dateInputValue(now);
+    el.findDate.value = dateInputValue(day);
+    el.findStart.value = hhmm(start);
+    el.findEnd.value = hhmm(Math.min(start + 60, DAY_END_MIN));
+    updateFindDurationUi();
+  }
+
+  function updateFindDurationUi() {
+    el.findEndRow.hidden = el.findDuration.value !== 'custom';
+  }
+
+  // Zwraca { start, end, minCapacity, errors[] } z formularza wyszukiwania.
+  function readFindForm() {
+    var errors = [];
+    var day = parseDateInput(el.findDate.value);
+    var startMin = parseHm(el.findStart.value);
+    var start = null, end = null;
+    if (!day) errors.push('Podaj datę.');
+    if (startMin === null) errors.push('Podaj godzinę startu.');
+    if (day && startMin !== null) {
+      start = atMinutes(day, startMin);
+      if (el.findDuration.value === 'custom') {
+        var endMin = parseHm(el.findEnd.value);
+        if (endMin === null) errors.push('Podaj godzinę końca.');
+        else end = atMinutes(day, endMin);
+      } else {
+        end = new Date(start.getTime() + parseInt(el.findDuration.value, 10) * 60000);
+      }
+      if (end && end <= start) errors.push('Godzina końca musi być późniejsza niż początek.');
+      else if (end && endsAfterClose(start, end)) errors.push('Rezerwacja musi zakończyć się najpóźniej o ' + hhmm(DAY_END_MIN) + '.');
+    }
+    var cap = el.findCapacity.value.trim();
+    var minCapacity = null;
+    if (el.findCapacity.validity && el.findCapacity.validity.badInput) {
+      errors.push('Minimalna pojemność musi być liczbą.');
+    } else if (cap) {
+      minCapacity = parseInt(cap, 10);
+      if (!/^\d+$/.test(cap) || minCapacity < 1 || minCapacity > 50) errors.push('Minimalna pojemność musi być liczbą od 1 do 50.');
+    }
+    return { start: start, end: end, minCapacity: minCapacity, errors: errors };
+  }
+
+  function submitFind(ev) {
+    ev.preventDefault();
+    hideErrorBox(el.findError);
+    clear(el.findResults);
+    el.findInfo.textContent = '';
+
+    var f = readFindForm();
+    if (f.errors.length) {
+      state.findSeq++; // unieważnij ewentualne trwające wyszukiwanie
+      el.findSubmit.disabled = false;
+      showErrorBox(el.findError, { title: 'Popraw formularz.', lines: f.errors });
+      return;
+    }
+
+    var seq = ++state.findSeq;
+    el.findSubmit.disabled = true;
+    el.findInfo.textContent = 'Szukanie…';
+    api.findAvailable(f.start, f.end, el.findType.value, f.minCapacity).then(function (res) {
+      if (seq !== state.findSeq) return; // nowsze wyszukiwanie w toku
+      el.findSubmit.disabled = false;
+      el.findInfo.textContent = '';
+      if (!res.ok || !Array.isArray(res.data)) {
+        showErrorBox(el.findError, describeProblem(res));
+        return;
+      }
+      renderFindResults(res.data, f.start, f.end);
+    });
+  }
+
+  function renderFindResults(list, start, end) {
+    clear(el.findResults);
+    var when = fmtRange(start, end);
+    if (!list.length) {
+      el.findInfo.textContent = 'Brak wolnych zasobów w terminie: ' + when + '.';
+      return;
+    }
+    el.findInfo.textContent = 'Wolne w terminie: ' + when + ' (' + list.length + ')';
+    list.forEach(function (r) {
+      var li = document.createElement('li');
+      var main = document.createElement('div');
+      main.className = 'result-main';
+      var name = document.createElement('strong');
+      name.textContent = String(r.name);
+      var meta = document.createElement('span');
+      meta.className = 'result-meta';
+      meta.textContent = typeLabel(r.type) + ' · pojemność ' + r.capacity;
+      main.appendChild(name);
+      main.appendChild(meta);
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = 'Zarezerwuj';
+      btn.setAttribute('aria-label', 'Zarezerwuj ' + r.name + ', ' + when);
+      btn.addEventListener('click', function () { bookFromSearch(r, start, end); });
+      li.appendChild(main);
+      li.appendChild(btn);
+      el.findResults.appendChild(li);
+    });
+  }
+
+  // Ustawia zasób i tydzień (bez przeładowania); zwraca false, gdy zasobu nie da się wybrać.
+  function selectResourceAndWeek(resource, date) {
+    var known = state.resources.some(function (r) { return r.id === resource.id; });
+    writeStorage(RESOURCE_KEY, resource.id);
+    if (!known) {
+      if (resource.isActive === false || !resource.name) return false;
+      state.resources.push(resource); // np. zasób dodany po załadowaniu strony
+      fillResourceSelect(state.resources);
+    }
+    state.resourceId = resource.id;
+    el.resourceSelect.value = resource.id;
+    state.weekStart = startOfWeek(date);
+    state.bookings = [];
+    return true;
+  }
+
+  function bookFromSearch(resource, start, end) {
+    selectResourceAndWeek(resource, start);
+    loadWeek().then(function () {
+      openBookingDialog(start, Math.round((end - start) / 60000));
+    });
+  }
+
   // ---------- localStorage ----------
 
   function readStorage(key) {
@@ -699,6 +878,33 @@
       startUtc: b.startUtc, endUtc: b.endUtc, createdAt: b.createdAt };
   }
 
+  // Reguły czasowe jak w BookingPolicy (uproszczenie: w strefie przeglądarki). Zwraca errors albo null.
+  function mockTimeErrors(s, e, startKey, endKey) {
+    var errs = {};
+    function add(key, msg) { (errs[key] = errs[key] || []).push(msg); }
+    if (isNaN(s)) add(startKey, 'Nieprawidłowy format daty.');
+    if (isNaN(e)) add(endKey, 'Nieprawidłowy format daty.');
+    if (Object.keys(errs).length) return errs;
+    var dur = (e - s) / 60000;
+    if (!(s < e)) add(endKey, 'Koniec musi być późniejszy niż początek.');
+    else if (dur < 15) add(endKey, 'Rezerwacja musi trwać co najmniej 15 minut.');
+    else if (dur > 480) add(endKey, 'Rezerwacja może trwać maksymalnie 8 godzin.');
+    if (s.getMinutes() % 15 || s.getSeconds()) add(startKey, 'Początek musi być wyrównany do 15 minut.');
+    if (e.getMinutes() % 15 || e.getSeconds()) add(endKey, 'Koniec musi być wyrównany do 15 minut.');
+    if (minutesOfDay(s) < DAY_START_MIN || !sameDay(s, e) || minutesOfDay(e) > DAY_END_MIN) {
+      add(startKey, 'Rezerwacja musi mieścić się w godzinach pracy 08:00–20:00 jednego dnia.');
+    }
+    if (s < new Date()) add(startKey, 'Nie można rezerwować w przeszłości.');
+    return Object.keys(errs).length ? errs : null;
+  }
+
+  function mockFindConflict(resourceId, s, e, exceptId) {
+    return mockDb.bookings.filter(function (b) {
+      return !b.cancelled && b.id !== exceptId && b.resourceId === resourceId &&
+        new Date(b.startUtc) < e && new Date(b.endUtc) > s;
+    })[0] || null;
+  }
+
   function mockRequest(method, url, body) {
     if (!mockDb) mockInit();
     var result;
@@ -723,6 +929,32 @@
 
     if (method === 'GET' && path === '/resources') {
       return { ok: true, status: 200, data: mockDb.resources.filter(function (r) { return r.isActive; }) };
+    }
+
+    if (method === 'GET' && path === '/resources/available') {
+      var qerr = {};
+      var qs = new Date(query.start), qe = new Date(query.end);
+      if (!query.start || isNaN(qs)) qerr.start = ['Parametr start jest wymagany (ISO 8601 z offsetem).'];
+      if (!query.end || isNaN(qe)) qerr.end = ['Parametr end jest wymagany (ISO 8601 z offsetem).'];
+      var qtype = query.type ? String(query.type).toLowerCase() : '';
+      if (qtype && qtype !== 'room' && qtype !== 'desk') qerr.type = ['Nieznany typ zasobu.'];
+      var qcap = null;
+      if (query.minCapacity) {
+        qcap = Number(query.minCapacity);
+        if (!/^\d+$/.test(query.minCapacity) || qcap < 1 || qcap > 50) qerr.minCapacity = ['Minimalna pojemność musi być liczbą od 1 do 50.'];
+      }
+      if (Object.keys(qerr).length) return mockProblem(400, 'Błąd walidacji.', null, qerr);
+      var qterr = mockTimeErrors(qs, qe, 'start', 'end');
+      if (qterr) return mockProblem(400, 'Błąd walidacji.', null, qterr);
+      var typeOrder = { room: 0, desk: 1 };
+      var free = mockDb.resources.filter(function (r) {
+        return r.isActive && (!qtype || r.type.toLowerCase() === qtype) && (qcap === null || r.capacity >= qcap) &&
+          !mockFindConflict(r.id, qs, qe, null);
+      }).sort(function (a, b) {
+        return a.capacity - b.capacity || typeOrder[a.type.toLowerCase()] - typeOrder[b.type.toLowerCase()] ||
+          (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+      });
+      return { ok: true, status: 200, data: free };
     }
 
     if (method === 'GET' && (m = /^\/resources\/([^/]+)\/bookings$/.exec(path))) {
@@ -750,22 +982,10 @@
       if (!res) return mockProblem(404, 'Nie znaleziono.', 'Zasób ' + body.resourceId + ' nie istnieje.');
 
       var s = new Date(body.startUtc), e = new Date(body.endUtc);
-      var dur = (e - s) / 60000;
-      var terr = {};
-      if (!(s < e)) terr.endUtc = ['Koniec musi być późniejszy niż początek.'];
-      else if (dur < 15) terr.endUtc = ['Rezerwacja musi trwać co najmniej 15 minut.'];
-      else if (dur > 480) terr.endUtc = ['Rezerwacja może trwać maksymalnie 8 godzin.'];
-      if (s.getMinutes() % 15 || s.getSeconds()) terr.startUtc = ['Początek musi być wyrównany do 15 minut.'];
-      if (e.getMinutes() % 15 || e.getSeconds()) terr.endUtc = (terr.endUtc || []).concat(['Koniec musi być wyrównany do 15 minut.']);
-      if (minutesOfDay(s) < DAY_START_MIN || !sameDay(s, e) || minutesOfDay(e) > DAY_END_MIN) {
-        terr.startUtc = (terr.startUtc || []).concat(['Rezerwacja musi mieścić się w godzinach pracy 08:00–20:00 jednego dnia.']);
-      }
-      if (s < new Date()) terr.startUtc = (terr.startUtc || []).concat(['Nie można rezerwować w przeszłości.']);
-      if (Object.keys(terr).length) return mockProblem(400, 'Błąd walidacji.', null, terr);
+      var terr = mockTimeErrors(s, e, 'startUtc', 'endUtc');
+      if (terr) return mockProblem(400, 'Błąd walidacji.', null, terr);
 
-      var conflict = mockDb.bookings.filter(function (b) {
-        return !b.cancelled && b.resourceId === res.id && new Date(b.startUtc) < e && new Date(b.endUtc) > s;
-      })[0];
+      var conflict = mockFindConflict(res.id, s, e, null);
       if (conflict) {
         return mockProblem(409, 'Kolizja rezerwacji.', 'Termin koliduje z istniejącą rezerwacją.', null,
           { conflictingBookingId: conflict.id });
@@ -820,6 +1040,9 @@
   el.detailsCloseBtn.addEventListener('click', function () { el.detailsDialog.close(); });
   el.detailsDeleteBtn.addEventListener('click', cancelSelectedBooking);
 
+  el.findForm.addEventListener('submit', submitFind);
+  el.findDuration.addEventListener('change', updateFindDurationUi);
+
   // Klik w tło dialogu zamyka go.
   [el.bookingDialog, el.detailsDialog].forEach(function (dlg) {
     dlg.addEventListener('click', function (ev) { if (ev.target === dlg) dlg.close(); });
@@ -837,6 +1060,7 @@
     if (!el.bookingDialog.open && !el.detailsDialog.open) renderGrid();
   }, 60000);
 
+  initFindForm();
   renderWeekLabel();
   renderGrid();
   loadResources();

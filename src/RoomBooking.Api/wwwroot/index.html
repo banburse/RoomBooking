@@ -28,6 +28,53 @@
       </div>
     </section>
 
+    <section class="panels" aria-label="Wyszukiwanie">
+      <details id="find-panel" class="panel">
+        <summary>Znajdź wolną salę</summary>
+        <form id="find-form" class="panel-form" novalidate>
+          <div class="form-row">
+            <label for="find-date">Data</label>
+            <input id="find-date" type="date" required>
+          </div>
+          <div class="form-row">
+            <label for="find-start">Godzina startu</label>
+            <input id="find-start" type="time" step="900" min="08:00" max="19:45" required>
+          </div>
+          <div class="form-row">
+            <label for="find-duration">Długość</label>
+            <select id="find-duration">
+              <option value="30">30 min</option>
+              <option value="60" selected>1 h</option>
+              <option value="120">2 h</option>
+              <option value="custom">Własna…</option>
+            </select>
+          </div>
+          <div class="form-row" id="find-end-row" hidden>
+            <label for="find-end">Godzina końca</label>
+            <input id="find-end" type="time" step="900" min="08:15" max="20:00">
+          </div>
+          <div class="form-row">
+            <label for="find-type">Typ</label>
+            <select id="find-type">
+              <option value="">Dowolny</option>
+              <option value="Room">Sala</option>
+              <option value="Desk">Biurko</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label for="find-capacity">Min. pojemność</label>
+            <input id="find-capacity" type="number" min="1" max="50" step="1" inputmode="numeric" placeholder="dowolna">
+          </div>
+          <div class="panel-actions">
+            <button type="submit" id="find-submit" class="primary">Szukaj</button>
+          </div>
+        </form>
+        <div id="find-error" class="error-box" role="alert" hidden></div>
+        <p id="find-info" class="muted panel-info" aria-live="polite"></p>
+        <ul id="find-results" class="result-list"></ul>
+      </details>
+    </section>
+
     <div id="status" class="status" role="status" aria-live="polite" hidden></div>
 
     <div class="grid-scroll">
