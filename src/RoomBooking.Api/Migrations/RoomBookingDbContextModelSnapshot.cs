@@ -28,6 +28,11 @@ namespace RoomBooking.Api.Migrations
                         .HasMaxLength(60)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("BookedByNormalized")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("TEXT");
+
                     b.Property<long?>("CancelledAt")
                         .HasColumnType("INTEGER");
 
@@ -48,6 +53,8 @@ namespace RoomBooking.Api.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("BookedByNormalized");
 
                     b.HasIndex("ResourceId", "StartUtc");
 

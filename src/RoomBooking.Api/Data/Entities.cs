@@ -35,6 +35,12 @@ public sealed class Booking
 
     public required string BookedBy { get; set; }
 
+    /// <summary>
+    /// Imię po Trim() i ToUpperInvariant() (także polskie znaki); indeks dla GET /bookings?bookedBy=.
+    /// Pusty string = wiersz sprzed migracji, uzupełniany przy starcie (DatabaseInitializer).
+    /// </summary>
+    public required string BookedByNormalized { get; set; }
+
     public string? Title { get; set; }
 
     public DateTimeOffset StartUtc { get; set; }
@@ -44,4 +50,6 @@ public sealed class Booking
     public DateTimeOffset CreatedAt { get; set; }
 
     public DateTimeOffset? CancelledAt { get; set; }
+
+    public static string NormalizeBookedBy(string bookedBy) => bookedBy.Trim().ToUpperInvariant();
 }

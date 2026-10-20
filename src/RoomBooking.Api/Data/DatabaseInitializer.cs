@@ -11,6 +11,7 @@ public static class DatabaseInitializer
         var db = scope.ServiceProvider.GetRequiredService<RoomBookingDbContext>();
 
         await db.Database.MigrateAsync(cancellationToken);
+        await BackfillBookedByNormalizedAsync(db, cancellationToken);
 
         if (await db.Resources.AnyAsync(cancellationToken))
         {
@@ -25,6 +26,29 @@ public static class DatabaseInitializer
             Create("D2", ResourceType.Desk, 1),
             Create("D3", ResourceType.Desk, 1),
             Create("D4", ResourceType.Desk, 1));
+
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Migracja BookingsBookedByNormalized dodaje kolumnę z wartością "" dla istniejących wierszy.
+    /// Uzupełniamy ją w kodzie, bo SQLite upper() zmienia tylko ASCII ("łukasz" nie dałby "ŁUKASZ").
+    /// Po pierwszym starcie zapytanie po indeksie nic nie zwraca, więc koszt jest pomijalny.
+    /// </summary>
+    private static async Task BackfillBookedByNormalizedAsync(RoomBookingDbContext db, CancellationToken cancellationToken)
+    {
+        var pending = await db.Bookings
+            .Where(b => b.BookedByNormalized == string.Empty)
+            .ToListAsync(cancellationToken);
+        if (pending.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var booking in pending)
+        {
+            booking.BookedByNormalized = Booking.NormalizeBookedBy(booking.BookedBy);
+        }
 
         await db.SaveChangesAsync(cancellationToken);
     }

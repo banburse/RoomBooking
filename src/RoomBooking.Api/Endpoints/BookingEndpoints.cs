@@ -82,6 +82,7 @@ public static class BookingEndpoints
             Id = Guid.NewGuid(),
             ResourceId = input.ResourceId,
             BookedBy = input.BookedBy,
+            BookedByNormalized = Booking.NormalizeBookedBy(input.BookedBy),
             Title = input.Title,
             StartUtc = input.StartUtc,
             EndUtc = input.EndUtc,

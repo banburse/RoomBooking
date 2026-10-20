@@ -32,6 +32,8 @@ public sealed class RoomBookingDbContext(DbContextOptions<RoomBookingDbContext> 
         {
             e.HasKey(b => b.Id);
             e.Property(b => b.BookedBy).IsRequired().HasMaxLength(Booking.BookedByMaxLength);
+            e.Property(b => b.BookedByNormalized).IsRequired().HasMaxLength(Booking.BookedByMaxLength);
+            e.HasIndex(b => b.BookedByNormalized);
             e.Property(b => b.Title).HasMaxLength(Booking.TitleMaxLength);
             e.HasOne(b => b.Resource)
                 .WithMany()
