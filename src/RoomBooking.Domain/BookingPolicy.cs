@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace RoomBooking.Domain;
 
 /// <summary>
@@ -63,6 +65,26 @@ public sealed class BookingPolicy(TimeProvider timeProvider, BookingPolicyOption
             Add(EndKey, $"Koniec rezerwacji musi być wyrównany do {granularity} (np. 09:00, 09:15).");
         }
 
+        var hours = $"{Format(_options.OpeningTime)}–{Format(_options.ClosingTime)} (strefa {_options.TimeZoneId})";
+        var startTime = TimeOnly.FromDateTime(startLocal.DateTime);
+        if (startTime < _options.OpeningTime || startTime >= _options.ClosingTime)
+        {
+            Add(StartKey, $"Początek rezerwacji musi mieścić się w godzinach pracy {hours}.");
+        }
+
+        if (startLocal.Date != endLocal.Date)
+        {
+            Add(EndKey, $"Rezerwacja musi zaczynać się i kończyć tego samego dnia (strefa {_options.TimeZoneId}).");
+        }
+        else
+        {
+            var endTime = TimeOnly.FromDateTime(endLocal.DateTime);
+            if (endTime > _options.ClosingTime || endTime <= _options.OpeningTime)
+            {
+                Add(EndKey, $"Koniec rezerwacji musi mieścić się w godzinach pracy {hours}.");
+            }
+        }
+
         return errors.Count == 0
             ? BookingValidationResult.Success
             : BookingValidationResult.Failure(errors.ToDictionary(e => e.Key, e => e.Value.ToArray(), StringComparer.Ordinal));
@@ -87,6 +109,8 @@ public sealed class BookingPolicy(TimeProvider timeProvider, BookingPolicyOption
         var granularityTicks = _options.SlotGranularity.Ticks;
         return granularityTicks <= 0 || local.TimeOfDay.Ticks % granularityTicks == 0;
     }
+
+    private static string Format(TimeOnly time) => time.ToString("HH:mm", CultureInfo.InvariantCulture);
 
     private static string FormatDuration(TimeSpan duration)
     {
