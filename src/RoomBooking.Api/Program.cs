@@ -29,14 +29,46 @@ builder.Services.Configure<RouteHandlerOptions>(options => options.ThrowOnBadReq
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<ProblemExceptionHandler>();
 
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
 var app = builder.Build();
 
 await DatabaseInitializer.InitializeAsync(app.Services);
 
 app.UseExceptionHandler();
 
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
 app.MapResourceEndpoints();
 app.MapBookingEndpoints();
+
+// Fallback SPA: nieznane ścieżki GET (bez rozszerzenia pliku) -> index.html. Ścieżki API dostają 404 ProblemDetails.
+app.MapFallback(async (HttpContext context, IWebHostEnvironment env, CancellationToken cancellationToken) =>
+{
+    var path = context.Request.Path;
+    var isApiPath = path.StartsWithSegments("/resources", StringComparison.OrdinalIgnoreCase)
+        || path.StartsWithSegments("/bookings", StringComparison.OrdinalIgnoreCase)
+        || path.StartsWithSegments("/swagger", StringComparison.OrdinalIgnoreCase);
+    var isGet = HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsHead(context.Request.Method);
+    var index = env.WebRootFileProvider.GetFileInfo("index.html");
+
+    if (isApiPath || !isGet || !index.Exists)
+    {
+        return Problems.NotFound($"Ścieżka {path} nie istnieje.");
+    }
+
+    context.Response.ContentType = "text/html; charset=utf-8";
+    await context.Response.SendFileAsync(index, cancellationToken);
+    return Results.Empty;
+});
 
 await app.RunAsync();
 
