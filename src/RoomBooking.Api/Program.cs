@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using RoomBooking.Api.Data;
 using RoomBooking.Api.Endpoints;
 using RoomBooking.Api.Http;
+using RoomBooking.Api.Validation;
 using RoomBooking.Domain;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -14,6 +15,7 @@ builder.Services.Configure<BookingPolicyOptions>(builder.Configuration.GetSectio
 builder.Services.AddSingleton<IBookingPolicy>(sp => new BookingPolicy(
     sp.GetRequiredService<TimeProvider>(),
     sp.GetRequiredService<IOptions<BookingPolicyOptions>>().Value));
+builder.Services.AddSingleton<RequestValidator>();
 
 // Connection string czytany leniwie, żeby testy mogły go nadpisać przez UseSetting.
 builder.Services.AddDbContext<RoomBookingDbContext>((sp, options) =>
@@ -34,6 +36,7 @@ await DatabaseInitializer.InitializeAsync(app.Services);
 app.UseExceptionHandler();
 
 app.MapResourceEndpoints();
+app.MapBookingEndpoints();
 
 await app.RunAsync();
 

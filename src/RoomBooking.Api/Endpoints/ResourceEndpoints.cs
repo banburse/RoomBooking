@@ -24,6 +24,12 @@ public static class ResourceEndpoints
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status409Conflict);
 
+        group.MapGet("/{id:guid}/bookings", ListResourceBookings)
+            .WithName("ListResourceBookings")
+            .Produces<BookingResponse[]>()
+            .ProducesValidationProblem()
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
         return app;
     }
 
@@ -96,6 +102,39 @@ public static class ResourceEndpoints
         }
 
         return TypedResults.Created($"/resources/{resource.Id}", ResourceResponse.From(resource));
+    }
+
+    // 3. GET /resources/{id}/bookings?from=...&to=...
+    private static async Task<IResult> ListResourceBookings(
+        Guid id,
+        string? from,
+        string? to,
+        RequestValidator validator,
+        RoomBookingDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var range = validator.ValidateBookingRange(from, to);
+        if (!range.IsValid)
+        {
+            return Problems.Validation(range.Errors!);
+        }
+
+        if (!await db.Resources.AsNoTracking().AnyAsync(r => r.Id == id, cancellationToken))
+        {
+            return Problems.NotFound($"Zasób {id} nie istnieje.");
+        }
+
+        var (fromUtc, toUtc) = range.Value!;
+        var bookings = await db.Bookings.AsNoTracking()
+            .Where(b => b.ResourceId == id
+                && b.CancelledAt == null
+                && b.StartUtc < toUtc
+                && b.EndUtc > fromUtc)
+            .OrderBy(b => b.StartUtc)
+            .Select(b => new BookingResponse(b.Id, b.ResourceId, b.BookedBy, b.Title, b.StartUtc, b.EndUtc, b.CreatedAt))
+            .ToListAsync(cancellationToken);
+
+        return TypedResults.Ok(bookings);
     }
 
     private static IResult DuplicateName(string name) =>
