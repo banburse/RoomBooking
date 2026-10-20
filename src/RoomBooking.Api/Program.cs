@@ -1,6 +1,9 @@
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using RoomBooking.Api.Data;
+using RoomBooking.Api.Endpoints;
+using RoomBooking.Api.Http;
 using RoomBooking.Domain;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -16,9 +19,21 @@ builder.Services.AddSingleton<IBookingPolicy>(sp => new BookingPolicy(
 builder.Services.AddDbContext<RoomBookingDbContext>((sp, options) =>
     options.UseSqlite(sp.GetRequiredService<IConfiguration>().GetConnectionString("RoomBooking")));
 
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+
+// Błędy wiązania (zły JSON, brak body) zawsze jako wyjątek -> ProblemExceptionHandler -> 400 ProblemDetails.
+builder.Services.Configure<RouteHandlerOptions>(options => options.ThrowOnBadRequest = true);
+builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<ProblemExceptionHandler>();
+
 var app = builder.Build();
 
 await DatabaseInitializer.InitializeAsync(app.Services);
+
+app.UseExceptionHandler();
+
+app.MapResourceEndpoints();
 
 await app.RunAsync();
 
