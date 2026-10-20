@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RoomBooking: rezerwacje sal i biurek</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>RoomBooking</h1>
+    <span id="mock-badge" class="mock-badge" hidden>tryb demo (mock)</span>
+  </header>
+
+  <main>
+    <section class="toolbar" aria-label="Wybór zasobu i tygodnia">
+      <div class="field-inline">
+        <label for="resource-select">Zasób</label>
+        <select id="resource-select" disabled>
+          <option value="">Ładowanie…</option>
+        </select>
+      </div>
+      <div class="week-nav">
+        <button type="button" id="prev-week" aria-label="Poprzedni tydzień">&#8249;</button>
+        <button type="button" id="today-btn">Dziś</button>
+        <button type="button" id="next-week" aria-label="Następny tydzień">&#8250;</button>
+        <span id="week-range" class="week-range" aria-live="polite"></span>
+      </div>
+    </section>
+
+    <div id="status" class="status" role="status" aria-live="polite" hidden></div>
+
+    <div class="grid-scroll">
+      <div id="week-grid" class="week-grid" aria-label="Widok tygodnia"></div>
+    </div>
+    <p class="hint">Kliknij wolny slot, aby zarezerwować. Kliknij rezerwację, aby zobaczyć szczegóły. Godziny w strefie: <span id="tz-name"></span>.</p>
+  </main>
+
+  <dialog id="booking-dialog" aria-labelledby="booking-dialog-title">
+    <form id="booking-form" method="dialog" novalidate>
+      <h2 id="booking-dialog-title">Nowa rezerwacja</h2>
+      <p id="booking-summary" class="summary"></p>
+
+      <div class="form-row">
+        <label for="booked-by">Imię <span aria-hidden="true">*</span></label>
+        <input id="booked-by" name="bookedBy" type="text" maxlength="60" required autocomplete="name">
+      </div>
+      <div class="form-row">
+        <label for="booking-title">Tytuł (opcjonalnie)</label>
+        <input id="booking-title" name="title" type="text" maxlength="100">
+      </div>
+      <div class="form-row">
+        <label for="duration">Długość</label>
+        <select id="duration" name="duration">
+          <option value="30">30 min</option>
+          <option value="60">1 h</option>
+          <option value="120">2 h</option>
+          <option value="custom">Własna…</option>
+        </select>
+      </div>
+      <div class="form-row" id="custom-end-row" hidden>
+        <label for="custom-end">Godzina końca</label>
+        <input id="custom-end" name="customEnd" type="time" step="900" min="08:15" max="20:00">
+      </div>
+      <p id="booking-end-preview" class="summary muted"></p>
+
+      <div id="booking-error" class="error-box" role="alert" hidden></div>
+
+      <div class="dialog-actions">
+        <button type="button" id="booking-cancel-btn" class="secondary">Zamknij</button>
+        <button type="submit" id="booking-save-btn" class="primary">Zarezerwuj</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="details-dialog" aria-labelledby="details-dialog-title">
+    <div class="dialog-body">
+      <h2 id="details-dialog-title">Szczegóły rezerwacji</h2>
+      <dl class="details">
+        <dt>Zasób</dt><dd id="details-resource"></dd>
+        <dt>Kto</dt><dd id="details-booked-by"></dd>
+        <dt>Tytuł</dt><dd id="details-title"></dd>
+        <dt>Kiedy</dt><dd id="details-when"></dd>
+        <dt>Utworzono</dt><dd id="details-created"></dd>
+      </dl>
+      <div id="details-error" class="error-box" role="alert" hidden></div>
+      <div class="dialog-actions">
+        <button type="button" id="details-close-btn" class="secondary">Zamknij</button>
+        <button type="button" id="details-delete-btn" class="danger">Anuluj rezerwację</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
