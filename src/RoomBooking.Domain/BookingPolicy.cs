@@ -37,6 +37,11 @@ public sealed class BookingPolicy(TimeProvider timeProvider, BookingPolicyOption
         var startLocal = TimeZoneInfo.ConvertTime(start, _zone);
         var endLocal = TimeZoneInfo.ConvertTime(end, _zone);
 
+        if (start < _timeProvider.GetUtcNow())
+        {
+            Add(StartKey, "Nie można rezerwować w przeszłości.");
+        }
+
         if (start >= end)
         {
             Add(EndKey, "Koniec rezerwacji musi być późniejszy niż początek.");
