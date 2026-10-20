@@ -92,6 +92,8 @@ Body:
   albo pełny ISO 8601 z offsetem (GUI wysyła ten wariant: północ poniedziałku/soboty w strefie przeglądarki, w UTC).
 - Zwraca niezanulowane rezerwacje **nachodzące** na `[from, to)`: `startUtc < to && endUtc > from`, sortowane po `startUtc` rosnąco.
 - **400**: brak/zły format, `to <= from`, zakres > 31 dni (`errors.from` lub `errors.to`).
+- Limit 31 dni liczony w **czasie lokalnym biura** (dni kalendarzowe): zakres dozwolony, gdy lokalne `to` ≤ lokalne `from` + 31 dni.
+  Przykład: `from=2026-10-01`, `to=2026-11-01` jest dozwolone, mimo że przez zmianę czasu to 31 d + 1 h czasu bezwzględnego.
 - **404**: zasób nie istnieje (zasób nieaktywny nadal zwraca swoje rezerwacje).
 - **200**: tablica Booking.
 
@@ -108,6 +110,7 @@ Body:
 ```
 Kolejność sprawdzeń (pierwszy błąd kończy):
 1. Walidacja wejścia → **400**: `resourceId` niepusty, `bookedBy` wymagane po `Trim()` 1–60, `title` ≤ 100 (pusty/biały → `null`), `startUtc`/`endUtc` wymagane.
+   Brak, zły format lub brak offsetu w czasie → błąd pod kluczem tego pola (`errors.startUtc` / `errors.endUtc`).
 2. Zasób nie istnieje lub `isActive = false` → **404**.
 3. Reguły czasowe `IBookingPolicy.Validate` → **400** (klucze `startUtc`/`endUtc`).
 4. W jednej transakcji: kolizja (`IBookingPolicy.FindConflict`) → **409** z `conflictingBookingId`; inaczej zapis.
