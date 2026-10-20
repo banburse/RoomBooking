@@ -35,6 +35,7 @@
     bookings: [],
     loadSeq: 0,
     pendingSlotStart: null,
+    bookingDialogSeq: 0,
     selectedBooking: null
   };
 
@@ -470,6 +471,7 @@
 
   function openBookingDialog(slotStart) {
     state.pendingSlotStart = slotStart;
+    state.bookingDialogSeq++; // unieważnia odpowiedzi z poprzednich otwarć okienka
     hideErrorBox(el.bookingError);
     var res = currentResource();
     el.bookingSummary.textContent = (res ? res.name + ', ' : '') + longDateFmt.format(slotStart) + ', od ' + fmtTime(slotStart);
@@ -479,6 +481,11 @@
     var defEnd = Math.min(minutesOfDay(slotStart) + 60, DAY_END_MIN);
     el.customEnd.value = pad2(Math.floor(defEnd / 60)) + ':' + pad2(defEnd % 60);
     el.customEnd.min = hhmm(minutesOfDay(slotStart) + 15);
+    // Wyłącz gotowe długości, które wychodzą poza koniec dnia pracy (np. 2 h od 19:30).
+    var startMin = minutesOfDay(slotStart);
+    Array.prototype.forEach.call(el.duration.options, function (opt) {
+      opt.disabled = opt.value !== 'custom' && startMin + parseInt(opt.value, 10) > DAY_END_MIN;
+    });
     updateDurationUi();
     el.bookingSaveBtn.disabled = false;
     el.bookingDialog.showModal();
@@ -500,6 +507,11 @@
     return new Date(start.getTime() + parseInt(el.duration.value, 10) * 60000);
   }
 
+  // Koniec po 20:00 (lub następnego dnia) jest poza godzinami pracy.
+  function endsAfterClose(start, end) {
+    return end.getTime() > atMinutes(start, DAY_END_MIN).getTime();
+  }
+
   function updateDurationUi() {
     el.customEndRow.hidden = el.duration.value !== 'custom';
     var start = state.pendingSlotStart;
@@ -508,8 +520,10 @@
       el.endPreview.textContent = el.duration.value === 'custom' ? 'Podaj godzinę końca późniejszą niż początek.' : '';
       return;
     }
-    el.endPreview.textContent = 'Termin: ' + fmtTime(start) + '–' + fmtTime(end) +
+    var text = 'Termin: ' + fmtTime(start) + '–' + fmtTime(end) +
       ' (' + durationLabel(Math.round((end - start) / 60000)) + ')';
+    if (endsAfterClose(start, end)) text += '. Uwaga: koniec po ' + hhmm(DAY_END_MIN) + ', poza godzinami pracy.';
+    el.endPreview.textContent = text;
   }
 
   function submitBooking(ev) {
@@ -524,6 +538,7 @@
     var clientErrors = [];
     if (!name) clientErrors.push('Imię jest wymagane.');
     if (!end || end <= start) clientErrors.push('Godzina końca musi być późniejsza niż początek.');
+    else if (endsAfterClose(start, end)) clientErrors.push('Rezerwacja musi zakończyć się najpóźniej o ' + hhmm(DAY_END_MIN) + '.');
     if (clientErrors.length) {
       showErrorBox(el.bookingError, { title: 'Popraw formularz.', lines: clientErrors });
       (name ? el.customEnd : el.bookedBy).focus();
@@ -533,6 +548,10 @@
     writeStorage(NAME_KEY, name);
     el.bookingSaveBtn.disabled = true;
 
+    // Odpowiedź dotyczy tylko tego otwarcia okienka; po zamknięciu/ponownym otwarciu ją pomijamy.
+    var seq = state.bookingDialogSeq;
+    function stillCurrent() { return seq === state.bookingDialogSeq && el.bookingDialog.open; }
+
     api.createBooking({
       resourceId: state.resourceId,
       bookedBy: name,
@@ -540,6 +559,10 @@
       startUtc: start.toISOString(),
       endUtc: end.toISOString()
     }).then(function (res) {
+      if (!stillCurrent()) {
+        loadWeek(); // stan mógł się zmienić; samo okienko zostawiamy w spokoju
+        return;
+      }
       el.bookingSaveBtn.disabled = false;
       if (res.ok) {
         el.bookingDialog.close();
@@ -550,6 +573,7 @@
       if (res.status === 409) {
         // Odśwież tydzień, żeby było widać kolidującą rezerwację; dopisz jej szczegóły.
         loadWeek().then(function () {
+          if (!stillCurrent()) return;
           var extra = [];
           var cid = res.data && res.data.conflictingBookingId;
           var c = cid ? findBooking(cid) : null;
