@@ -36,6 +36,24 @@ public sealed class RoomBookingApiFactory : WebApplicationFactory<Program>
 
     public string DatabasePath { get; }
 
+    /// <summary>
+    /// Ustawia <c>IsActive</c> zasobu bezpośrednio w pliku SQLite (v1 nie ma endpointu do dezaktywacji).
+    /// Celowo bez zależności od DbContext z Api: tabela <c>Resources</c>, kolumny <c>Id</c> i <c>IsActive</c>.
+    /// Host musi być już uruchomiony (migracja wykonana).
+    /// </summary>
+    public async Task SetResourceActiveAsync(Guid resourceId, bool isActive)
+    {
+        await using var connection = new SqliteConnection($"Data Source={DatabasePath}");
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        // EF Core SQLite zapisuje Guid jako TEXT wielkimi literami; porównanie bez wielkości liter dla pewności.
+        command.CommandText = "UPDATE \"Resources\" SET \"IsActive\" = $active WHERE upper(\"Id\") = upper($id)";
+        command.Parameters.AddWithValue("$active", isActive ? 1 : 0);
+        command.Parameters.AddWithValue("$id", resourceId.ToString());
+        var updated = await command.ExecuteNonQueryAsync();
+        Assert.Equal(1, updated);
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseSetting("ConnectionStrings:RoomBooking", $"Data Source={DatabasePath}");

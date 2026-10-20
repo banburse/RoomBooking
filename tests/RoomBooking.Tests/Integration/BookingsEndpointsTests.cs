@@ -210,6 +210,25 @@ public class BookingsEndpointsTests
     }
 
     [Fact]
+    public async Task PostBooking_InactiveResource_Returns404_ButItsBookingsStayReadable()
+    {
+        await using var factory = new RoomBookingApiFactory();
+        var client = factory.CreateClient();
+        var beta = await client.GetResourceIdAsync("Beta");
+        var booking = await client.CreateBookingAsync(beta, Start, End);
+
+        // v1 nie ma endpointu do dezaktywacji: ustawiamy flagę bezpośrednio w pliku SQLite fabryki.
+        await factory.SetResourceActiveAsync(beta, isActive: false);
+
+        using var response = await client.PostBookingAsync(beta, End, End.AddHours(1));
+        await response.ReadProblemAsync(HttpStatusCode.NotFound);
+
+        Assert.DoesNotContain(await client.GetResourcesAsync(), r => r.Id == beta);
+        var bookings = await client.GetBookingsAsync(beta, "2026-10-19", "2026-10-26");
+        Assert.Equal([booking.Id], bookings.Select(b => b.Id));
+    }
+
+    [Fact]
     public async Task PostBooking_UnknownResource_Returns404()
     {
         await using var factory = new RoomBookingApiFactory();
