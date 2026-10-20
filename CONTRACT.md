@@ -122,6 +122,42 @@ Kolejność sprawdzeń (pierwszy błąd kończy):
 - **404**: nie istnieje lub już anulowana.
 - **409**: rezerwacja już się zakończyła (`endUtc <= now`). Trwającą można anulować.
 
+### 6. `GET /resources/available?start=…&end=…&type=…&minCapacity=…` (v1.1)
+- `start`, `end` wymagane: pełny ISO 8601 z offsetem (bez wariantu samej daty). `type` opcjonalny jak w endpoincie 1. `minCapacity` opcjonalny, liczba 1–50.
+- Kolejność sprawdzeń:
+  1. Format parametrów → **400** z kluczami `start`, `end`, `type`, `minCapacity`.
+  2. Reguły czasowe `IBookingPolicy.Validate` (z `ResourceId = Guid.Empty`, `BookedBy = ""`; pola tekstowe policy nie sprawdza) → **400**. Klucze błędów policy mapowane: `startUtc` → `start`, `endUtc` → `end`.
+- **200**: tablica Resource (jak w endpoincie 1): aktywne zasoby pasujące do `type` i `capacity >= minCapacity`, bez żadnej niezanulowanej rezerwacji nachodzącej na `[start, end)`.
+  Sortowanie: `capacity` rosnąco, potem `type` (Room, Desk), potem `name`. Pusta tablica, gdy nic nie ma.
+- Trasa `/resources/available` nie może kolidować z `/resources/{id}/bookings` (id ma ograniczenie `:guid`).
+
+### 7. `PUT /bookings/{id}` (v1.1)
+Body (wszystkie trzy pola wysyłane zawsze; zasób i `bookedBy` niezmienne):
+```json
+{ "startUtc": "2026-10-21T08:30:00Z", "endUtc": "2026-10-21T09:30:00Z", "title": "Daily (przesunięte)" }
+```
+Kolejność sprawdzeń (pierwszy błąd kończy):
+1. Walidacja wejścia → **400**: jak w `POST /bookings` dla `startUtc`, `endUtc`, `title`.
+2. Rezerwacja nie istnieje lub anulowana → **404**. Jej zasób nieaktywny → **404**.
+3. Rezerwacja już się rozpoczęła (`startUtc <= now`, stary termin) → **409** ogólny (`title: "Konflikt."`, `detail` o rozpoczętej rezerwacji, **bez** `conflictingBookingId`).
+4. Reguły czasowe `IBookingPolicy.Validate` dla nowego terminu → **400** (klucze `startUtc`/`endUtc`).
+5. W jednej transakcji: ponowne sprawdzenie 2–3, kolizja z **innymi** rezerwacjami zasobu (edytowana wyłączona z listy przekazanej do `FindConflict`) → **409** z `conflictingBookingId`; inaczej zapis.
+- **200**, body = Booking po zmianie (`createdAt` bez zmian).
+- Równoległe `PUT`/`POST` na ten sam wolny slot: dokładnie jedno się udaje (200/201), drugie 409.
+
+### 8. `GET /bookings?bookedBy=…` (v1.1)
+- `bookedBy` wymagane, po `Trim()` 1–60 znaków → inaczej **400** (`errors.bookedBy`).
+- Porównanie bez wielkości liter, także dla polskich znaków (np. kolumna znormalizowana `ToUpperInvariant()` jak przy nazwie zasobu; migracja EF).
+- **200**: niezanulowane rezerwacje tej osoby z `endUtc > now`, ze wszystkich zasobów (także nieaktywnych), sortowane po `startUtc`, maks. 100.
+  Element tablicy = Booking z dwoma dodatkowymi polami:
+```json
+{
+  "id": "…", "resourceId": "…", "bookedBy": "Łukasz", "title": null,
+  "startUtc": "2026-10-21T08:00:00+00:00", "endUtc": "2026-10-21T09:00:00+00:00", "createdAt": "…",
+  "resourceName": "Alfa", "resourceType": "Room"
+}
+```
+
 ## Reguły czasowe (Domain, `BookingPolicy`)
 - `start < end`; czas trwania 15 min – 8 h.
 - `start` i `end` wyrównane do 15 min (sekundy i milisekundy = 0) w strefie biura.

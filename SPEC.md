@@ -75,6 +75,29 @@ Pliki: `index.html`, `app.js`, `style.css`.
 - Responsywne na tyle, by nie rozsypało się na wąskim ekranie (poziomy scroll siatki jest OK).
 - Bez frameworków i bibliotek zewnętrznych (brak CDN).
 
+## v1.1: wyszukiwanie, edycja, moje rezerwacje
+
+### Nowe endpointy (3)
+6. `GET /resources/available?start=…&end=…&type=Room|Desk&minCapacity=N` aktywne zasoby wolne w `[start, end)`. Te same reguły czasowe co przy rezerwacji (godziny pracy, wyrównanie, przeszłość), więc znaleziony zasób da się od razu zarezerwować. Sortowane od najmniejszej pasującej pojemności.
+7. `PUT /bookings/{id}` zmiana `startUtc`, `endUtc`, `title` rezerwacji, która jeszcze się nie rozpoczęła (zasób i imię bez zmian). 200 + rezerwacja. 400 walidacja/reguły, 404 brak lub anulowana, 409 kolizja (z `conflictingBookingId`) albo rezerwacja już się rozpoczęła.
+8. `GET /bookings?bookedBy=Jan` nadchodzące i trwające (niezanulowane, `end > now`) rezerwacje danej osoby ze wszystkich zasobów, z nazwą zasobu. Imię porównywane bez wielkości liter (także polskie znaki), po `Trim()`.
+
+### Reguły
+- Edycja nie koliduje sama ze sobą: przesunięcie 10:00-11:00 na 10:30-11:30 przechodzi, jeśli slot 11:00-11:30 jest wolny.
+- **Współbieżność:** `PUT` i `POST` (lub dwa `PUT`) na ten sam wolny slot: dokładnie jedno się udaje, drugie dostaje 409. Sprawdzenie i zapis w jednej transakcji. Wymagany test.
+- Logika domenowa (`IBookingPolicy`) bez zmian: wyszukiwanie i edycja korzystają z `Validate` i `FindConflict`.
+
+### GUI
+- **Znajdź wolną salę:** panel z datą, godziną startu (krok 15 min), długością (30 min / 1 h / 2 h / własna), typem (dowolny / sala / biurko) i minimalną pojemnością. Wyniki jako lista (nazwa, typ, pojemność) z przyciskiem „Zarezerwuj”, który wybiera zasób, przechodzi do właściwego tygodnia i otwiera okienko rezerwacji z wypełnionym czasem. Pusta lista i błędy pokazane w panelu.
+- **Edycja:** w szczegółach rezerwacji, która się jeszcze nie rozpoczęła, przycisk „Edytuj”: godzina startu, godzina końca (ten sam dzień), tytuł. Zapis przez `PUT`, błędy 400/409 w okienku.
+- **Moje rezerwacje:** lista nadchodzących rezerwacji dla imienia z `localStorage` (z możliwością wpisania innego): zasób, data, godziny, tytuł. Klik w pozycję przechodzi do zasobu i tygodnia i otwiera szczegóły. Pusty stan z komunikatem.
+
+### Przypadki brzegowe do przetestowania (v1.1)
+- Wyszukiwanie: zasób z rezerwacją back-to-back jest wolny; z anulowaną rezerwacją jest wolny; nieaktywny nie jest zwracany; `minCapacity` i `type` filtrują
+- Edycja: przesunięcie nachodzące na własny stary termin przechodzi; na cudzy daje 409; rozpoczęta daje 409; anulowana daje 404
+- `bookedBy` bez wielkości liter z polskimi znakami („łukasz” znajduje „Łukasz”)
+- Równoległe `PUT` i `POST` na ten sam slot
+
 ## Wymagania niefunkcjonalne
 - Błędy jako `ProblemDetails` (RFC 9457)
 - Walidacja wejścia w jednym miejscu
@@ -95,5 +118,6 @@ Pliki: `index.html`, `app.js`, `style.css`.
 - `dotnet build` bez warningów, `dotnet test` zielone
 - Każdy endpoint ma min. 1 test happy path i 1 test błędu
 - GUI działa: da się zobaczyć tydzień, zarezerwować slot, zobaczyć konflikt i anulować
+- (v1.1) GUI: da się znaleźć wolną salę i z wyniku zarezerwować, edytować rezerwację, zobaczyć swoje rezerwacje
 - README z komendą uruchomienia, przykładami `curl` i krótkim opisem GUI
 - Review bez otwartych uwag blocker/major
