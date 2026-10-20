@@ -12,6 +12,11 @@ public static class BookingEndpoints
     {
         var group = app.MapGroup("/bookings").WithTags("Bookings");
 
+        group.MapGet("/", ListBookingsByPerson)
+            .WithName("ListBookingsByPerson")
+            .Produces<MyBookingResponse[]>()
+            .ProducesValidationProblem();
+
         group.MapPost("/", CreateBooking)
             .WithName("CreateBooking")
             .Produces<BookingResponse>(StatusCodes.Status201Created)
@@ -33,6 +38,44 @@ public static class BookingEndpoints
             .ProducesProblem(StatusCodes.Status409Conflict);
 
         return app;
+    }
+
+    public const int MaxPersonBookings = 100;
+
+    // 8. GET /bookings?bookedBy=...
+    private static async Task<IResult> ListBookingsByPerson(
+        string? bookedBy,
+        TimeProvider timeProvider,
+        RoomBookingDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var validated = RequestValidator.ValidateBookedByQuery(bookedBy);
+        if (!validated.IsValid)
+        {
+            return Problems.Validation(validated.Errors!);
+        }
+
+        var normalized = Booking.NormalizeBookedBy(validated.Value!);
+        var now = timeProvider.GetUtcNow();
+
+        // Wszystkie zasoby, także nieaktywne. Indeks na BookedByNormalized.
+        var bookings = await db.Bookings.AsNoTracking()
+            .Where(b => b.BookedByNormalized == normalized && b.CancelledAt == null && b.EndUtc > now)
+            .OrderBy(b => b.StartUtc)
+            .Take(MaxPersonBookings)
+            .Select(b => new MyBookingResponse(
+                b.Id,
+                b.ResourceId,
+                b.BookedBy,
+                b.Title,
+                b.StartUtc,
+                b.EndUtc,
+                b.CreatedAt,
+                b.Resource!.Name,
+                b.Resource.Type))
+            .ToListAsync(cancellationToken);
+
+        return TypedResults.Ok(bookings);
     }
 
     // 4. POST /bookings. Kolejność sprawdzeń wg CONTRACT.md: walidacja -> zasób -> reguły czasowe -> kolizja.

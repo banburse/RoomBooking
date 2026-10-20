@@ -36,3 +36,15 @@ public sealed record BookingResponse(
     public static BookingResponse From(Booking b) =>
         new(b.Id, b.ResourceId, b.BookedBy, b.Title, b.StartUtc, b.EndUtc, b.CreatedAt);
 }
+
+/// <summary>GET /bookings?bookedBy=: Booking z nazwą i typem zasobu.</summary>
+public sealed record MyBookingResponse(
+    Guid Id,
+    Guid ResourceId,
+    string BookedBy,
+    string? Title,
+    DateTimeOffset StartUtc,
+    DateTimeOffset EndUtc,
+    DateTimeOffset CreatedAt,
+    string ResourceName,
+    ResourceType ResourceType);

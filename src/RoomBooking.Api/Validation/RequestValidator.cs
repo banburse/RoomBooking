@@ -116,7 +116,28 @@ public sealed partial class RequestValidator
             errors.Add("resourceId", "Nieprawidłowy identyfikator zasobu.");
         }
 
-        var bookedBy = request.BookedBy?.Trim();
+        var bookedBy = ValidateBookedBy(request.BookedBy, errors);
+        var title = ValidateTitle(request.Title, errors);
+        var (start, end) = ValidateBookingTimes(request.StartUtc, request.EndUtc, errors);
+
+        return errors.HasErrors
+            ? Validated<BookingRequest>.Fail(errors.ToDictionary())
+            : Validated<BookingRequest>.Ok(new BookingRequest(resourceId, bookedBy!, title, start, end));
+    }
+
+    /// <summary>GET /bookings?bookedBy=: wymagane, po Trim() 1–60 znaków. Zwraca imię po Trim().</summary>
+    public static Validated<string> ValidateBookedByQuery(string? bookedBy)
+    {
+        var errors = new ErrorBag();
+        var trimmed = ValidateBookedBy(bookedBy, errors);
+        return errors.HasErrors
+            ? Validated<string>.Fail(errors.ToDictionary())
+            : Validated<string>.Ok(trimmed!);
+    }
+
+    private static string? ValidateBookedBy(string? value, ErrorBag errors)
+    {
+        var bookedBy = value?.Trim();
         if (string.IsNullOrEmpty(bookedBy))
         {
             errors.Add("bookedBy", "Imię jest wymagane.");
@@ -126,12 +147,7 @@ public sealed partial class RequestValidator
             errors.Add("bookedBy", $"Imię może mieć maksymalnie {Booking.BookedByMaxLength} znaków.");
         }
 
-        var title = ValidateTitle(request.Title, errors);
-        var (start, end) = ValidateBookingTimes(request.StartUtc, request.EndUtc, errors);
-
-        return errors.HasErrors
-            ? Validated<BookingRequest>.Fail(errors.ToDictionary())
-            : Validated<BookingRequest>.Ok(new BookingRequest(resourceId, bookedBy!, title, start, end));
+        return bookedBy;
     }
 
     /// <summary>PUT /bookings/{id}: te same reguły co w POST dla startUtc, endUtc i title.</summary>
